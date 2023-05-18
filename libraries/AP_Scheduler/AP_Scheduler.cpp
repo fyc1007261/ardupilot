@@ -314,7 +314,7 @@ void AP_Scheduler::run(uint32_t time_available)
             {
                 perf_info.task_slipped(i);
                 int slipped = dt / interval_ticks;
-                for (int s = 0; s < slipped; s++)
+                for (int s = 0; s < slipped - 1; s++)
                     Profiler::log_exec_time(task.priority, -1);
             }
 
