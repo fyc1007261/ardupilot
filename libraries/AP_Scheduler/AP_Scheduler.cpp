@@ -38,6 +38,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <iostream>
 
 class Profiler
 {
@@ -66,8 +67,39 @@ public:
             exit(1);
         }
     }
+
+    static void log_hit_miss(int prio, bool hit)
+    {
+        if (fd < 0)
+            init();
+        char buf[100] = {0};
+        if (hit)
+            sprintf(buf, "%d,hit\n", prio);
+        else
+            sprintf(buf, "%d,miss\n", prio);
+        int ret = write(fd, buf, strlen(buf));
+        if (ret != (int)strlen(buf))
+        {
+            fprintf(stderr, "Fail to write %s\n", strerror(errno));
+            exit(1);
+        }
+    }
 };
 #include <sys/time.h>
+#include <signal.h>
+#include <pthread.h>
+#include <thread>
+
+pthread_t tid = 0;
+int running_prio = -1;
+
+void alarmHandler(int signum) {
+    std::cout << "Received SIGALRM signal!" << std::endl;
+    if (tid > 0)
+        pthread_kill(tid, SIGTERM);
+    tid = 0;
+    Profiler::log_hit_miss(running_prio, 0);
+}
 
 class Timestamp
 {
@@ -343,8 +375,19 @@ void AP_Scheduler::run(uint32_t time_available)
         fill_nanf_stack();
 #endif
         Timestamp t1;
-        task.function();
+        std::cout << _task_time_allowed << std::endl;
+        ualarm(_task_time_allowed, 0);
+        running_prio = task.priority;
+        std::cout << "Trying to start thread for " << (int)task.priority << std::endl;
+        std::thread th(task.function);
+
+        tid = th.native_handle();
+        // task.function();
+        th.join();
         Timestamp t2;
+        ualarm(0, 0);
+        tid = 0;
+        Profiler::log_hit_miss(task.priority, true);
         hal.util->persistent_data.scheduler_task = -1;
 
         // record the tick counter when we ran. This drives
