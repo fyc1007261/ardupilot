@@ -93,7 +93,8 @@ public:
 pthread_t tid = 0;
 int running_prio = -1;
 
-void alarmHandler(int signum) {
+void alarmHandler(int signum)
+{
     std::cout << "Received SIGALRM signal!" << std::endl;
     if (tid > 0)
         pthread_kill(tid, SIGTERM);
@@ -121,7 +122,7 @@ int Profiler::fd = -1;
 #if APM_BUILD_COPTER_OR_HELI || APM_BUILD_TYPE(APM_BUILD_ArduSub)
 #define SCHEDULER_DEFAULT_LOOP_RATE 400
 #else
-#define SCHEDULER_DEFAULT_LOOP_RATE 50
+#define SCHEDULER_DEFAULT_LOOP_RATE 400 /* changed from 50 to 400 for testing */
 #endif
 
 #define debug(level, fmt, args...)            \
@@ -213,7 +214,27 @@ void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint
     _num_tasks = _num_vehicle_tasks + _num_common_tasks;
 
     _last_run = new uint16_t[_num_tasks];
+    _ticks_per_vehicle_task = new uint16_t[_num_vehicle_tasks];
+    _ticks_per_common_task = new uint16_t[_num_common_tasks];
     _tick_counter = 0;
+
+    for (uint16_t i = 0; i < _num_common_tasks; ++i)
+    {
+        if (_common_tasks[i].rate_hz > 0)
+            _ticks_per_common_task[i] = _loop_rate_hz / _common_tasks[i].rate_hz;
+        else
+            _ticks_per_common_task[i] = 1;
+        // std::cout << _loop_rate_hz << " " << _common_tasks[i].rate_hz << std::endl;
+        // std::cout << "common task " << i << "prio " << (int)_common_tasks[i].priority << " " << _ticks_per_common_task[i] << std::endl;
+    }
+    for (uint16_t i = 0; i < _num_vehicle_tasks; ++i)
+    {
+        if (_vehicle_tasks[i].rate_hz > 0)
+            _ticks_per_vehicle_task[i] = _loop_rate_hz / _vehicle_tasks[i].rate_hz;
+        else
+            _ticks_per_vehicle_task[i] = 1;
+        // std::cout << "vehicle task " << i << " " << _ticks_per_vehicle_task[i] << std::endl;
+    }
 
     // setup initial performance counters
     perf_info.set_loop_rate(get_loop_rate_hz());
@@ -273,8 +294,15 @@ static void fill_nanf_stack(void)
   run one tick
   this will run as many scheduler tasks as we can in the specified time
  */
+
+static Timestamp lasttime;
 void AP_Scheduler::run(uint32_t time_available)
 {
+    Timestamp nowts;
+    std::cout << "current hertz " << _loop_rate_hz << std::endl;
+    std::cout << "currect tick " << _tick_counter << std::endl;
+    std::cout << nowts - lasttime << " since last tick\n";
+    lasttime = nowts;
     uint32_t run_started_usec = AP_HAL::micros();
     uint32_t now = run_started_usec;
 
@@ -327,7 +355,18 @@ void AP_Scheduler::run(uint32_t time_available)
 
         if (task.priority > MAX_FAST_TASK_PRIORITIES)
         {
-            const uint16_t dt = _tick_counter - _last_run[i];
+            // const uint16_t dt = _tick_counter - _last_run[i];
+            /* Yifan: compute the start of period */
+            uint16_t dt;
+            if (run_vehicle_task)
+            {
+                dt = _tick_counter % _ticks_per_vehicle_task[vehicle_tasks_offset - 1] - _last_run[i];
+            }
+            else
+            {
+                dt = _tick_counter % _ticks_per_common_task[common_tasks_offset - 1] - _last_run[i];
+            }
+
             // we allow 0 to mean loop rate
             uint32_t interval_ticks = (is_zero(task.rate_hz) ? 1 : _loop_rate_hz / task.rate_hz);
             if (interval_ticks < 1)
@@ -375,18 +414,18 @@ void AP_Scheduler::run(uint32_t time_available)
         fill_nanf_stack();
 #endif
         Timestamp t1;
-        std::cout << _task_time_allowed << std::endl;
-        ualarm(_task_time_allowed, 0);
+        // std::cout << _task_time_allowed << std::endl;
+        // ualarm(_task_time_allowed, 0);
         running_prio = task.priority;
-        std::cout << "Trying to start thread for " << (int)task.priority << std::endl;
-        std::thread th(task.function);
+        // std::cout << "Trying to start thread for " << (int)task.priority << std::endl;
+        // std::thread th(task.function);
 
-        tid = th.native_handle();
-        // task.function();
-        th.join();
+        // tid = th.native_handle();
+        task.function();
+        // th.join();
         Timestamp t2;
-        ualarm(0, 0);
-        tid = 0;
+        // ualarm(0, 0);
+        // tid = 0;
         Profiler::log_hit_miss(task.priority, true);
         hal.util->persistent_data.scheduler_task = -1;
 
@@ -394,11 +433,21 @@ void AP_Scheduler::run(uint32_t time_available)
         // when we next run the event
         _last_run[i] = _tick_counter;
 
+        /* Yifan: Align to the start tick of task period */
+        if (run_vehicle_task)
+        {
+            _last_run[i] -= _tick_counter % _ticks_per_vehicle_task[vehicle_tasks_offset - 1];
+        }
+        else
+        {
+            _last_run[i] = _tick_counter % _ticks_per_common_task[common_tasks_offset - 1];
+        }
+
         // work out how long the event actually took
         now = AP_HAL::micros();
         uint32_t time_taken = now - _task_time_started;
 
-        Profiler::log_exec_time(task.priority, t2-t1);
+        Profiler::log_exec_time(task.priority, t2 - t1);
 
         bool overrun = false;
         if (time_taken > _task_time_allowed)

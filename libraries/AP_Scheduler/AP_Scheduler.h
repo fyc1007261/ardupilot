@@ -227,8 +227,15 @@ private:
     uint16_t _tick_counter;
     uint32_t _tick_counter32;
 
+    /* time delayed by slow tasks */
+    uint32_t _tick_delayed;
+
     // tick counter at the time we last ran each task
     uint16_t *_last_run;
+
+    // For how many ticks will a task run for once
+    uint16_t *_ticks_per_vehicle_task;
+    uint16_t *_ticks_per_common_task;
 
     // number of microseconds allowed for the current task
     uint32_t _task_time_allowed;
