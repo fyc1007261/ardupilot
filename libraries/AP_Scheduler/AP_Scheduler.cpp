@@ -39,6 +39,8 @@
 #include <string.h>
 #include <errno.h>
 #include <iostream>
+#include <sys/types.h>
+#include <signal.h>
 
 class Profiler
 {
@@ -92,15 +94,6 @@ public:
 
 pthread_t tid = 0;
 int running_prio = -1;
-
-void alarmHandler(int signum)
-{
-    std::cout << "Received SIGALRM signal!" << std::endl;
-    if (tid > 0)
-        pthread_kill(tid, SIGTERM);
-    tid = 0;
-    Profiler::log_hit_miss(running_prio, 0);
-}
 
 class Timestamp
 {
@@ -185,6 +178,13 @@ AP_Scheduler *AP_Scheduler::get_singleton()
     return _singleton;
 }
 
+volatile int16_t task_running;
+void sigusr2_handler(int signum)
+{
+    /* just to interrupt the sleep function */
+    return;
+}
+
 // initialise the scheduler
 void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint32_t log_performance_bit)
 {
@@ -235,6 +235,13 @@ void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint
             _ticks_per_vehicle_task[i] = 1;
         // std::cout << "vehicle task " << i << " " << _ticks_per_vehicle_task[i] << std::endl;
     }
+
+    /* Yifan: register SIGUSR2 handler to indicate that
+    a task has finished */
+    task_running = -1;
+    struct sigaction action = {0};
+    action.sa_handler = sigusr2_handler;
+    sigaction(SIGUSR2, &action, nullptr);
 
     // setup initial performance counters
     perf_info.set_loop_rate(get_loop_rate_hz());
@@ -312,6 +319,7 @@ void AP_Scheduler::run(uint32_t time_available)
     for (uint8_t i = 0; i < _num_tasks; i++)
     {
         // determine which of the common task / vehicle task to run
+        uint16_t task_deadline;
         bool run_vehicle_task = false;
         if (vehicle_tasks_offset < _num_vehicle_tasks &&
             common_tasks_offset < _num_common_tasks)
@@ -360,11 +368,13 @@ void AP_Scheduler::run(uint32_t time_available)
             uint16_t dt;
             if (run_vehicle_task)
             {
-                dt = _tick_counter % _ticks_per_vehicle_task[vehicle_tasks_offset - 1] - _last_run[i];
+                task_deadline = _tick_counter - _tick_counter % _ticks_per_vehicle_task[vehicle_tasks_offset - 1] + _ticks_per_vehicle_task[vehicle_tasks_offset - 1];
+                dt = task_deadline - _ticks_per_vehicle_task[vehicle_tasks_offset - 1] - _last_run[i];
             }
             else
             {
-                dt = _tick_counter % _ticks_per_common_task[common_tasks_offset - 1] - _last_run[i];
+                task_deadline = _tick_counter - _tick_counter % _ticks_per_common_task[common_tasks_offset - 1] + _ticks_per_common_task[common_tasks_offset - 1];
+                dt = task_deadline - _ticks_per_common_task[common_tasks_offset - 1] - _last_run[i];
             }
 
             // we allow 0 to mean loop rate
@@ -386,7 +396,7 @@ void AP_Scheduler::run(uint32_t time_available)
                 perf_info.task_slipped(i);
                 int slipped = dt / interval_ticks;
                 for (int s = 0; s < slipped - 1; s++)
-                    Profiler::log_exec_time(task.priority, -1);
+                    Profiler::log_hit_miss(task.priority, false);
             }
 
             if (dt >= interval_ticks * max_task_slowdown)
@@ -414,19 +424,39 @@ void AP_Scheduler::run(uint32_t time_available)
         fill_nanf_stack();
 #endif
         Timestamp t1;
-        // std::cout << _task_time_allowed << std::endl;
-        // ualarm(_task_time_allowed, 0);
         running_prio = task.priority;
-        // std::cout << "Trying to start thread for " << (int)task.priority << std::endl;
-        // std::thread th(task.function);
 
-        // tid = th.native_handle();
-        task.function();
-        // th.join();
+        auto func = [&]
+        {
+            task_running = task.priority;
+            task.function();
+            Profiler::log_hit_miss(task.priority, true);
+            task_running = -1;
+            kill(0, SIGUSR2);
+        };
+
+        std::thread th(func);
+
+        int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
+        if (sleep_time < 0)
+        {
+            std::cout << "BUG!\n" << std::endl;
+            exit(1);
+        }
+        usleep(sleep_time);
+        if (task_running > 0)
+        {
+            /* deadline miss */
+            pthread_kill(th.native_handle(), SIGKILL);
+            task_running = -1;
+            Profiler::log_hit_miss(task.priority, false);
+        }
+        else
+        {
+            /* deadline hit */
+            th.join();
+        }
         Timestamp t2;
-        // ualarm(0, 0);
-        // tid = 0;
-        Profiler::log_hit_miss(task.priority, true);
         hal.util->persistent_data.scheduler_task = -1;
 
         // record the tick counter when we ran. This drives
