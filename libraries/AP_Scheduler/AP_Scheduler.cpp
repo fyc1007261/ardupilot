@@ -115,7 +115,7 @@ int Profiler::fd = -1;
 #if APM_BUILD_COPTER_OR_HELI || APM_BUILD_TYPE(APM_BUILD_ArduSub)
 #define SCHEDULER_DEFAULT_LOOP_RATE 400
 #else
-#define SCHEDULER_DEFAULT_LOOP_RATE 400 /* changed from 50 to 400 for testing */
+#define SCHEDULER_DEFAULT_LOOP_RATE 50 /* changed from 50 to 400 for testing */
 #endif
 
 #define debug(level, fmt, args...)            \
@@ -220,7 +220,7 @@ void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint
 
     for (uint16_t i = 0; i < _num_common_tasks; ++i)
     {
-        if (_common_tasks[i].rate_hz > 0)
+        if (_common_tasks[i].rate_hz > 0 && _common_tasks[i].rate_hz <= _loop_rate_hz)
             _ticks_per_common_task[i] = _loop_rate_hz / _common_tasks[i].rate_hz;
         else
             _ticks_per_common_task[i] = 1;
@@ -229,7 +229,7 @@ void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint
     }
     for (uint16_t i = 0; i < _num_vehicle_tasks; ++i)
     {
-        if (_vehicle_tasks[i].rate_hz > 0)
+        if (_vehicle_tasks[i].rate_hz > 0 && _vehicle_tasks[i].rate_hz <= _loop_rate_hz)
             _ticks_per_vehicle_task[i] = _loop_rate_hz / _vehicle_tasks[i].rate_hz;
         else
             _ticks_per_vehicle_task[i] = 1;
@@ -306,10 +306,10 @@ static Timestamp lasttime;
 void AP_Scheduler::run(uint32_t time_available)
 {
     Timestamp nowts;
-    std::cout << "current hertz " << _loop_rate_hz << std::endl;
-    std::cout << "currect tick " << _tick_counter << std::endl;
-    std::cout << nowts - lasttime << " since last tick\n";
-    lasttime = nowts;
+    // std::cout << "current hertz " << _loop_rate_hz << std::endl;
+    // std::cout << "currect tick " << _tick_counter << std::endl;
+    // std::cout << nowts - lasttime << " since last tick\n";
+    // lasttime = nowts;
     uint32_t run_started_usec = AP_HAL::micros();
     uint32_t now = run_started_usec;
 
@@ -368,6 +368,7 @@ void AP_Scheduler::run(uint32_t time_available)
             uint16_t dt;
             if (run_vehicle_task)
             {
+                // std::cout << _ticks_per_vehicle_task[vehicle_tasks_offset - 1] << std::endl;
                 task_deadline = _tick_counter - _tick_counter % _ticks_per_vehicle_task[vehicle_tasks_offset - 1] + _ticks_per_vehicle_task[vehicle_tasks_offset - 1];
                 dt = task_deadline - _ticks_per_vehicle_task[vehicle_tasks_offset - 1] - _last_run[i];
             }
@@ -426,36 +427,37 @@ void AP_Scheduler::run(uint32_t time_available)
         Timestamp t1;
         running_prio = task.priority;
 
-        auto func = [&]
-        {
-            task_running = task.priority;
-            task.function();
-            Profiler::log_hit_miss(task.priority, true);
-            task_running = -1;
-            kill(0, SIGUSR2);
-        };
+        // auto func = [&]
+        // {
+        //     task_running = task.priority;
+        //     task.function();
+        //     Profiler::log_hit_miss(task.priority, true);
+        //     task_running = -1;
+        //     kill(0, SIGUSR2);
+        // };
 
-        std::thread th(func);
+        // std::thread th(func);
+        task.function();
 
-        int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
-        if (sleep_time < 0)
-        {
-            std::cout << "BUG!\n" << std::endl;
-            exit(1);
-        }
-        usleep(sleep_time);
-        if (task_running > 0)
-        {
-            /* deadline miss */
-            pthread_kill(th.native_handle(), SIGKILL);
-            task_running = -1;
-            Profiler::log_hit_miss(task.priority, false);
-        }
-        else
-        {
-            /* deadline hit */
-            th.join();
-        }
+        // int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
+        // if (sleep_time < 0)
+        // {
+        //     std::cout << "BUG!\n" << std::endl;
+        //     exit(1);
+        // }
+        // usleep(sleep_time);
+        // if (task_running > 0)
+        // {
+        //     /* deadline miss */
+        //     pthread_kill(th.native_handle(), SIGKILL);
+        //     task_running = -1;
+        //     Profiler::log_hit_miss(task.priority, false);
+        // }
+        // else
+        // {
+        //     /* deadline hit */
+        //     th.join();
+        // }
         Timestamp t2;
         hal.util->persistent_data.scheduler_task = -1;
 
