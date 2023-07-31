@@ -56,12 +56,12 @@ public:
         }
     }
 
-    static void log_exec_time(int prio, int t)
+    static void log_exec_time(int prio, int t, uint64_t tick = 0)
     {
         if (fd < 0)
             init();
         char buf[100] = {0};
-        sprintf(buf, "%d,%d\n", prio, t);
+        sprintf(buf, "%d,%d,%ld\n", prio, t, tick);
         int ret = write(fd, buf, strlen(buf));
         if (ret != (int)strlen(buf))
         {
@@ -70,15 +70,15 @@ public:
         }
     }
 
-    static void log_hit_miss(int prio, bool hit)
+    static void log_hit_miss(int prio, bool hit, uint64_t tick = 0)
     {
         if (fd < 0)
             init();
         char buf[100] = {0};
         if (hit)
-            sprintf(buf, "%d,hit\n", prio);
+            sprintf(buf, "%d,hit,%ld\n", prio, tick);
         else
-            sprintf(buf, "%d,miss\n", prio);
+            sprintf(buf, "%d,miss,%ld\n", prio, tick);
         int ret = write(fd, buf, strlen(buf));
         if (ret != (int)strlen(buf))
         {
@@ -115,7 +115,7 @@ int Profiler::fd = -1;
 #if APM_BUILD_COPTER_OR_HELI || APM_BUILD_TYPE(APM_BUILD_ArduSub)
 #define SCHEDULER_DEFAULT_LOOP_RATE 400
 #else
-#define SCHEDULER_DEFAULT_LOOP_RATE 50 /* changed from 50 to 400 for testing */
+#define SCHEDULER_DEFAULT_LOOP_RATE 400 /* changed from 50 to 400 for testing */
 #endif
 
 #define debug(level, fmt, args...)            \
@@ -376,6 +376,7 @@ void AP_Scheduler::run(uint32_t time_available)
             {
                 task_deadline = _tick_counter - _tick_counter % _ticks_per_common_task[common_tasks_offset - 1] + _ticks_per_common_task[common_tasks_offset - 1];
                 dt = task_deadline - _ticks_per_common_task[common_tasks_offset - 1] - _last_run[i];
+                
             }
 
             // we allow 0 to mean loop rate
@@ -396,8 +397,9 @@ void AP_Scheduler::run(uint32_t time_available)
             {
                 perf_info.task_slipped(i);
                 int slipped = dt / interval_ticks;
+
                 for (int s = 0; s < slipped - 1; s++)
-                    Profiler::log_hit_miss(task.priority, false);
+                    Profiler::log_hit_miss(task.priority, false, _tick_counter);
             }
 
             if (dt >= interval_ticks * max_task_slowdown)
@@ -472,14 +474,16 @@ void AP_Scheduler::run(uint32_t time_available)
         }
         else
         {
-            _last_run[i] = _tick_counter % _ticks_per_common_task[common_tasks_offset - 1];
+            _last_run[i] -= _tick_counter % _ticks_per_common_task[common_tasks_offset - 1];
+            // if (task.priority == 205)
+            //         std::cout << "last run " << _tick_counter << " " << _ticks_per_common_task[common_tasks_offset - 1] << std::endl;
         }
 
         // work out how long the event actually took
         now = AP_HAL::micros();
         uint32_t time_taken = now - _task_time_started;
 
-        Profiler::log_exec_time(task.priority, t2 - t1);
+        Profiler::log_exec_time(task.priority, t2 - t1, _tick_counter);
 
         bool overrun = false;
         if (time_taken > _task_time_allowed)
