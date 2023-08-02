@@ -315,11 +315,11 @@ void AP_Scheduler::run(uint32_t time_available)
 
     uint8_t vehicle_tasks_offset = 0;
     uint8_t common_tasks_offset = 0;
-
+    uint16_t task_deadline = UINT16_MAX;
     for (uint8_t i = 0; i < _num_tasks; i++)
     {
         // determine which of the common task / vehicle task to run
-        uint16_t task_deadline;
+
         bool run_vehicle_task = false;
         if (vehicle_tasks_offset < _num_vehicle_tasks &&
             common_tasks_offset < _num_common_tasks)
@@ -369,14 +369,23 @@ void AP_Scheduler::run(uint32_t time_available)
             if (run_vehicle_task)
             {
                 // std::cout << _ticks_per_vehicle_task[vehicle_tasks_offset - 1] << std::endl;
-                task_deadline = _tick_counter - _tick_counter % _ticks_per_vehicle_task[vehicle_tasks_offset - 1] + _ticks_per_vehicle_task[vehicle_tasks_offset - 1];
-                dt = task_deadline - _ticks_per_vehicle_task[vehicle_tasks_offset - 1] - _last_run[i];
+                task_deadline = (_tick_counter - 1) -
+                                (_tick_counter - 1) %
+                                    _ticks_per_vehicle_task[vehicle_tasks_offset - 1] +
+                                _ticks_per_vehicle_task[vehicle_tasks_offset - 1] + 1;
+                dt = task_deadline -
+                     _ticks_per_vehicle_task[vehicle_tasks_offset - 1] -
+                     _last_run[i];
             }
             else
             {
-                task_deadline = _tick_counter - _tick_counter % _ticks_per_common_task[common_tasks_offset - 1] + _ticks_per_common_task[common_tasks_offset - 1];
-                dt = task_deadline - _ticks_per_common_task[common_tasks_offset - 1] - _last_run[i];
-                
+                task_deadline = (_tick_counter - 1) -
+                                (_tick_counter - 1) %
+                                    _ticks_per_common_task[common_tasks_offset - 1] +
+                                _ticks_per_common_task[common_tasks_offset - 1] + 1;
+                dt = task_deadline -
+                     _ticks_per_common_task[common_tasks_offset - 1] -
+                     _last_run[i];
             }
 
             // we allow 0 to mean loop rate
@@ -429,37 +438,68 @@ void AP_Scheduler::run(uint32_t time_available)
         Timestamp t1;
         running_prio = task.priority;
 
-        // auto func = [&]
-        // {
-        //     task_running = task.priority;
-        //     task.function();
-        //     Profiler::log_hit_miss(task.priority, true);
-        //     task_running = -1;
-        //     kill(0, SIGUSR2);
-        // };
+        if (task.priority > MAX_FAST_TASK_PRIORITIES)
+        {
+            auto func = [&]
+            {
+                // std::cout << (int)task.priority << " running!\n"
+                //           << std::endl;
 
-        // std::thread th(func);
-        task.function();
+                task.function();
+                task_running = -1;
 
-        // int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
-        // if (sleep_time < 0)
-        // {
-        //     std::cout << "BUG!\n" << std::endl;
-        //     exit(1);
-        // }
-        // usleep(sleep_time);
-        // if (task_running > 0)
-        // {
-        //     /* deadline miss */
-        //     pthread_kill(th.native_handle(), SIGKILL);
-        //     task_running = -1;
-        //     Profiler::log_hit_miss(task.priority, false);
-        // }
-        // else
-        // {
-        //     /* deadline hit */
-        //     th.join();
-        // }
+                // kill(0, SIGUSR2);
+                //  std::cout << task.priority << " killed!\n"
+                //           << std::endl;
+            };
+            task_running = task.priority;
+            std::thread th(func);
+
+            // int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
+            // if (sleep_time < 0)
+            // {
+            //     std::cout << "BUG!\n"
+            //               << std::endl;
+            //     exit(1);
+            // }
+            // std::cout << (int)task.priority << "sleeping " << sleep_time << " " << task_deadline << " " << _tick_counter << std::endl;
+            // std::cout << (int)task.priority << std::endl;
+            // std::cout << _tick_counter << std::endl;
+            uint32_t ddl_us = get_loop_period_us() * (task_deadline - _tick_counter);
+
+            while (task_running >= 0)
+            {
+                Timestamp t;
+                if (t - t1 >= (int)ddl_us)
+                    break;
+                // std::cout << task_deadline << " "<< _tick_counter << std::endl;
+                // std::cout << t - t1 << " " << ddl_us << std::endl;
+            }
+
+            // std::cout << "awake " << _tick_counter << std::endl;
+
+            if (task_running > 0)
+            {
+                /* deadline miss */
+                // std::cout << "try killing " << _tick_counter << std::endl;
+                // pthread_kill(th.native_handle(), SIGKILL);
+                th.detach();
+                // std::cout << "killed " << _tick_counter << std::endl;
+                task_running = -1;
+                Profiler::log_hit_miss(task.priority, false);
+            }
+            else
+            {
+                /* deadline hit */
+                // std::cout << task_running << std::endl;
+                Profiler::log_hit_miss(task.priority, true, _tick_counter);
+                th.join();
+            }
+        }
+        else
+        {
+            task.function();
+        }
         Timestamp t2;
         hal.util->persistent_data.scheduler_task = -1;
 
