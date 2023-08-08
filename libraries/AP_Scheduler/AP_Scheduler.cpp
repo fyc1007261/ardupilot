@@ -56,12 +56,12 @@ public:
         }
     }
 
-    static void log_exec_time(int prio, int t, uint64_t tick = 0)
+    static void log_exec_time(int prio, int t, uint32_t tick = 0)
     {
         if (fd < 0)
             init();
         char buf[100] = {0};
-        sprintf(buf, "%d,%d,%ld\n", prio, t, tick);
+        sprintf(buf, "%d,%d,%u\n", prio, t, tick);
         int ret = write(fd, buf, strlen(buf));
         if (ret != (int)strlen(buf))
         {
@@ -70,15 +70,15 @@ public:
         }
     }
 
-    static void log_hit_miss(int prio, bool hit, uint64_t tick = 0)
+    static void log_hit_miss(int prio, bool hit, uint32_t tick = 0)
     {
         if (fd < 0)
             init();
         char buf[100] = {0};
         if (hit)
-            sprintf(buf, "%d,hit,%ld\n", prio, tick);
+            sprintf(buf, "%d,hit,%u\n", prio, tick);
         else
-            sprintf(buf, "%d,miss,%ld\n", prio, tick);
+            sprintf(buf, "%d,miss,%u\n", prio, tick);
         int ret = write(fd, buf, strlen(buf));
         if (ret != (int)strlen(buf))
         {
@@ -104,7 +104,7 @@ public:
         gettimeofday(&tv, NULL);
     }
 
-    int operator-(Timestamp &t2)
+    int64_t operator-(Timestamp &t2)
     {
         return tv.tv_usec - t2.tv.tv_usec + 1000000 * (tv.tv_sec - t2.tv.tv_sec);
     }
@@ -465,12 +465,17 @@ void AP_Scheduler::run(uint32_t time_available)
             // std::cout << (int)task.priority << "sleeping " << sleep_time << " " << task_deadline << " " << _tick_counter << std::endl;
             // std::cout << (int)task.priority << std::endl;
             // std::cout << _tick_counter << std::endl;
-            uint32_t ddl_us = get_loop_period_us() * (task_deadline - _tick_counter);
+            uint64_t ddl_us;
+            if (task_deadline > _tick_counter)
+                // not overflow
+                ddl_us = get_loop_period_us() * (uint16_t)(task_deadline - _tick_counter);
+            else
+                ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter);
 
             while (task_running >= 0)
             {
                 Timestamp t;
-                if (t - t1 >= (int)ddl_us)
+                if (t - t1 >= (int64_t)ddl_us)
                     break;
                 // std::cout << task_deadline << " "<< _tick_counter << std::endl;
                 // std::cout << t - t1 << " " << ddl_us << std::endl;
@@ -486,7 +491,7 @@ void AP_Scheduler::run(uint32_t time_available)
                 th.detach();
                 // std::cout << "killed " << _tick_counter << std::endl;
                 task_running = -1;
-                Profiler::log_hit_miss(task.priority, false);
+                Profiler::log_hit_miss(task.priority, false, _tick_counter);
             }
             else
             {
