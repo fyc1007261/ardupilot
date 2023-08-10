@@ -216,7 +216,7 @@ void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint
     _last_run = new uint16_t[_num_tasks];
     _ticks_per_vehicle_task = new uint16_t[_num_vehicle_tasks];
     _ticks_per_common_task = new uint16_t[_num_common_tasks];
-    _tick_counter = 0;
+    _tick_counter = (uint16_t)-1;
 
     for (uint16_t i = 0; i < _num_common_tasks; ++i)
     {
@@ -369,20 +369,20 @@ void AP_Scheduler::run(uint32_t time_available)
             if (run_vehicle_task)
             {
                 // std::cout << _ticks_per_vehicle_task[vehicle_tasks_offset - 1] << std::endl;
-                task_deadline = (_tick_counter - 1) -
-                                (_tick_counter - 1) %
+                task_deadline = (_tick_counter) -
+                                (_tick_counter) %
                                     _ticks_per_vehicle_task[vehicle_tasks_offset - 1] +
-                                _ticks_per_vehicle_task[vehicle_tasks_offset - 1] + 1;
+                                _ticks_per_vehicle_task[vehicle_tasks_offset - 1];
                 dt = task_deadline -
                      _ticks_per_vehicle_task[vehicle_tasks_offset - 1] -
                      _last_run[i];
             }
             else
             {
-                task_deadline = (_tick_counter - 1) -
-                                (_tick_counter - 1) %
+                task_deadline = (_tick_counter) -
+                                (_tick_counter) %
                                     _ticks_per_common_task[common_tasks_offset - 1] +
-                                _ticks_per_common_task[common_tasks_offset - 1] + 1;
+                                _ticks_per_common_task[common_tasks_offset - 1];
                 dt = task_deadline -
                      _ticks_per_common_task[common_tasks_offset - 1] -
                      _last_run[i];
