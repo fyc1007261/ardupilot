@@ -437,6 +437,7 @@ void AP_Scheduler::run(uint32_t time_available)
 #endif
         Timestamp t1;
         running_prio = task.priority;
+        bool missed = false;
 
         if (task.priority > MAX_FAST_TASK_PRIORITIES)
         {
@@ -471,14 +472,15 @@ void AP_Scheduler::run(uint32_t time_available)
                 ddl_us = get_loop_period_us() * (uint16_t)(task_deadline - _tick_counter);
             else
                 ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter);
-
+            
             while (task_running >= 0)
             {
                 Timestamp t;
                 if (t - t1 >= (int64_t)ddl_us)
+                {
+                    missed = true;
                     break;
-                // std::cout << task_deadline << " "<< _tick_counter << std::endl;
-                // std::cout << t - t1 << " " << ddl_us << std::endl;
+                }
             }
 
             // std::cout << "awake " << _tick_counter << std::endl;
@@ -564,6 +566,8 @@ void AP_Scheduler::run(uint32_t time_available)
         {
             time_available -= time_taken;
         }
+        if (missed)
+            time_available = 0;
     }
 
     // update number of spare microseconds
