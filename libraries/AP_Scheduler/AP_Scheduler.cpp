@@ -526,11 +526,12 @@ void AP_Scheduler::run(uint32_t time_available)
 
         // work out how long the event actually took
         now = AP_HAL::micros();
-        uint32_t time_taken = now - _task_time_started;
+        // uint32_t time_taken = now - _task_time_started;
+        uint32_t time_taken = t2 - t1;
 
         Profiler::log_exec_time(task.priority, t2 - t1, _tick_counter);
 
-        std::cout << task.priority << " " << time_taken << " " << t2 - t1 << std::endl;
+        // std::cout << task.priority << " " << time_taken << " " << t2 - t1 << std::endl;
 
         bool overrun = false;
         if (time_taken > _task_time_allowed)
