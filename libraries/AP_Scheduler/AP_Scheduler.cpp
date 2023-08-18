@@ -472,7 +472,7 @@ void AP_Scheduler::run(uint32_t time_available)
                 ddl_us = get_loop_period_us() * (uint16_t)(task_deadline - _tick_counter);
             else
                 ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter);
-            
+
             while (task_running >= 0)
             {
                 Timestamp t;
@@ -567,7 +567,10 @@ void AP_Scheduler::run(uint32_t time_available)
             time_available -= time_taken;
         }
         if (missed)
+        {
             time_available = 0;
+            return;
+        }
     }
 
     // update number of spare microseconds
