@@ -561,6 +561,7 @@ void AP_Scheduler::run(uint32_t time_available)
               only run fast tasks after this one
              */
             time_available = 0;
+            return;
         }
         else
         {
