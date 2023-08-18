@@ -530,6 +530,8 @@ void AP_Scheduler::run(uint32_t time_available)
 
         Profiler::log_exec_time(task.priority, t2 - t1, _tick_counter);
 
+        std::cout << task.priority << " " << time_taken << " " << t2 - t1 << std::endl;
+
         bool overrun = false;
         if (time_taken > _task_time_allowed)
         {
@@ -657,7 +659,7 @@ void AP_Scheduler::loop()
     }
 
     // add in extra loop time determined by not achieving scheduler tasks
-    time_available += extra_loop_us;
+    // time_available += extra_loop_us;
 
     // run the tasks
     run(time_available);
