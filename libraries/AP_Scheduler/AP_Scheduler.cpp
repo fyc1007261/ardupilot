@@ -435,78 +435,79 @@ void AP_Scheduler::run(uint32_t time_available)
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
         fill_nanf_stack();
 #endif
-        Timestamp t1;
+        
         running_prio = task.priority;
         bool missed = false;
 
-        if (task.priority > MAX_FAST_TASK_PRIORITIES)
+        // if (task.priority > MAX_FAST_TASK_PRIORITIES)
+        // {
+        auto func = [&]
         {
-            auto func = [&]
+            // std::cout << (int)task.priority << " running!\n"
+            //           << std::endl;
+
+            task.function();
+            task_running = -1;
+
+            // kill(0, SIGUSR2);
+            //  std::cout << task.priority << " killed!\n"
+            //           << std::endl;
+        };
+        task_running = task.priority;
+        std::thread th(func);
+        Timestamp t1;
+
+        // int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
+        // if (sleep_time < 0)
+        // {
+        //     std::cout << "BUG!\n"
+        //               << std::endl;
+        //     exit(1);
+        // }
+        // std::cout << (int)task.priority << "sleeping " << sleep_time << " " << task_deadline << " " << _tick_counter << std::endl;
+        // std::cout << (int)task.priority << std::endl;
+        // std::cout << _tick_counter << std::endl;
+        uint64_t ddl_us;
+        if (task_deadline > _tick_counter)
+            // not overflow
+            ddl_us = get_loop_period_us() * (uint16_t)(task_deadline - _tick_counter);
+        else
+            ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter);
+
+        while (task_running >= 0)
+        {
+            Timestamp t;
+            if (t - t1 >= (int64_t)ddl_us)
             {
-                // std::cout << (int)task.priority << " running!\n"
-                //           << std::endl;
-
-                task.function();
-                task_running = -1;
-
-                // kill(0, SIGUSR2);
-                //  std::cout << task.priority << " killed!\n"
-                //           << std::endl;
-            };
-            task_running = task.priority;
-            std::thread th(func);
-
-            // int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
-            // if (sleep_time < 0)
-            // {
-            //     std::cout << "BUG!\n"
-            //               << std::endl;
-            //     exit(1);
-            // }
-            // std::cout << (int)task.priority << "sleeping " << sleep_time << " " << task_deadline << " " << _tick_counter << std::endl;
-            // std::cout << (int)task.priority << std::endl;
-            // std::cout << _tick_counter << std::endl;
-            uint64_t ddl_us;
-            if (task_deadline > _tick_counter)
-                // not overflow
-                ddl_us = get_loop_period_us() * (uint16_t)(task_deadline - _tick_counter);
-            else
-                ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter);
-
-            while (task_running >= 0)
-            {
-                Timestamp t;
-                if (t - t1 >= (int64_t)ddl_us)
-                {
-                    missed = true;
-                    break;
-                }
+                missed = true;
+                break;
             }
+        }
 
-            // std::cout << "awake " << _tick_counter << std::endl;
+        // std::cout << "awake " << _tick_counter << std::endl;
 
-            if (task_running > 0)
-            {
-                /* deadline miss */
-                // std::cout << "try killing " << _tick_counter << std::endl;
-                // pthread_kill(th.native_handle(), SIGKILL);
-                th.detach();
-                // std::cout << "killed " << _tick_counter << std::endl;
-                task_running = -1;
-                Profiler::log_hit_miss(task.priority, false, _tick_counter);
-            }
-            else
-            {
-                /* deadline hit */
-                // std::cout << task_running << std::endl;
-                Profiler::log_hit_miss(task.priority, true, _tick_counter);
-                th.join();
-            }
+        if (task_running > 0)
+        {
+            /* deadline miss */
+            // std::cout << "try killing " << _tick_counter << std::endl;
+            // pthread_kill(th.native_handle(), SIGKILL);
+            th.detach();
+            // std::cout << "killed " << _tick_counter << std::endl;
+            task_running = -1;
+            Profiler::log_hit_miss(task.priority, false, _tick_counter);
         }
         else
         {
-            task.function();
+            /* deadline hit */
+            // std::cout << task_running << std::endl;
+            Profiler::log_hit_miss(task.priority, true, _tick_counter);
+            th.join();
         }
+        // }
+        // else
+        // {
+        //     task.function();
+        // }
         Timestamp t2;
         hal.util->persistent_data.scheduler_task = -1;
 
