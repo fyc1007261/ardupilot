@@ -110,6 +110,11 @@ public:
     }
 };
 
+void signalHandler(int signum)
+{
+    std::cerr << "Interrupt signal (" << signum << ") received.\n";
+}
+
 int Profiler::fd = -1;
 
 #if APM_BUILD_COPTER_OR_HELI || APM_BUILD_TYPE(APM_BUILD_ArduSub)
@@ -179,15 +184,13 @@ AP_Scheduler *AP_Scheduler::get_singleton()
 }
 
 volatile int16_t task_running;
-void sigusr2_handler(int signum)
-{
-    /* just to interrupt the sleep function */
-    return;
-}
+
 
 // initialise the scheduler
 void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint32_t log_performance_bit)
 {
+
+    signal(SIGUSR2, signalHandler);
     // grab the semaphore before we start anything
     _rsem.take_blocking();
 
@@ -239,10 +242,6 @@ void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint
     /* Yifan: register SIGUSR2 handler to indicate that
     a task has finished */
     task_running = -1;
-    struct sigaction action = {0};
-    action.sa_handler = sigusr2_handler;
-    sigaction(SIGUSR2, &action, nullptr);
-
     // setup initial performance counters
     perf_info.set_loop_rate(get_loop_rate_hz());
     perf_info.reset();
@@ -435,7 +434,7 @@ void AP_Scheduler::run(uint32_t time_available)
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
         fill_nanf_stack();
 #endif
-        
+
         running_prio = task.priority;
         bool missed = false;
 
@@ -489,12 +488,15 @@ void AP_Scheduler::run(uint32_t time_available)
         if (task_running > 0)
         {
             /* deadline miss */
-            // std::cout << "try killing " << _tick_counter << std::endl;
-            // pthread_kill(th.native_handle(), SIGKILL);
+            std::cout << "try killing " << _tick_counter << std::endl;
             th.detach();
-            // std::cout << "killed " << _tick_counter << std::endl;
+            // pthread_kill(th.native_handle(), SIGUSR2);
+
+            std::cerr << "killed " << task_running << " at " << _tick_counter << std::endl;
             task_running = -1;
+
             Profiler::log_hit_miss(task.priority, false, _tick_counter);
+            Profiler::log_hit_miss(10086, false, _tick_counter);
         }
         else
         {
