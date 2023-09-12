@@ -304,8 +304,6 @@ static void fill_nanf_stack(void)
  */
 
 static Timestamp lasttime;
-static int missed_in_a_row = 0;
-static int last_missed = 0;
 void AP_Scheduler::run(uint32_t time_available)
 {
     Timestamp nowts;
@@ -442,99 +440,38 @@ void AP_Scheduler::run(uint32_t time_available)
         running_prio = task.priority;
         bool missed = false;
 
-        // if (task.priority > MAX_FAST_TASK_PRIORITIES)
-        // {
-        auto func = [&]
-        {
-            // std::cout << (int)task.priority << " running!\n"
-            //           << std::endl;
-
-            task.function();
-            task_running = -1;
-
-            // kill(0, SIGUSR2);
-            //  std::cout << task.priority << " killed!\n"
-            //           << std::endl;
-        };
-        task_running = task.priority;
-        auto th = std::thread(func);
-        Timestamp t1;
-
-        // int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
-        // if (sleep_time < 0)
-        // {
-        //     std::cout << "BUG!\n"
-        //               << std::endl;
-        //     exit(1);
-        // }
-        // std::cout << (int)task.priority << "sleeping " << sleep_time << " " << task_deadline << " " << _tick_counter << std::endl;
-        // std::cout << (int)task.priority << std::endl;
-        // std::cout << _tick_counter << std::endl;
         uint64_t ddl_us;
         if (task_deadline > _tick_counter)
             // not overflow
             ddl_us = get_loop_period_us() * (uint16_t)(task_deadline - _tick_counter);
         else
-            ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter);
+            ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter + 1);
 
-        while (task_running >= 0)
+        task_running = task.priority;
+        Timestamp t_start;
+        // auto th = std::thread(func);
+        task.function();
+        Timestamp t_finish;
+        uint32_t time_taken = t_finish - t_start;
+
+        Profiler::log_exec_time(task.priority, time_taken, _tick_counter);
+
+        if (t_finish - t_start >= (int64_t)ddl_us)
         {
-            Timestamp t;
-            if (t - t1 >= (int64_t)ddl_us)
-            {
-                missed = true;
-                break;
-            }
-        }
-
-        // std::cout << "awake " << _tick_counter << std::endl;
-
-        if (task_running > 0)
-        {
-            /* deadline miss */
-            std::cout << "try killing " << _tick_counter << std::endl;
-            auto tid_kill = th.native_handle();
-
-            pthread_kill(tid_kill, SIGUSR2);
-            th.detach();
-            if (task.priority == last_missed)
-            {
-                missed_in_a_row++;
-                if (missed_in_a_row == 5)
-                {
-                    Profiler::log_hit_miss(10086, false, _tick_counter);
-                    std::cerr << "too many missed, killed\n";
-                    exit(1);
-                }
-            }
-            else
-            {
-                last_missed = task.priority;
-                missed_in_a_row = 1;
-            }
-
-            std::cerr << "killed " << task_running << " at " << _tick_counter << std::endl;
-            task_running = -1;
-
+            missed = true;
             Profiler::log_hit_miss(task.priority, false, _tick_counter);
+
+            std::cout << "ddl miss taking " << time_taken << " allowed " << ddl_us << std::endl;
+
+            _tick_counter -= ((time_taken - ddl_us) / get_loop_period_us() + 1);
+            _tick_counter32 -= ((time_taken - ddl_us) / get_loop_period_us() + 1);
         }
         else
         {
-            /* deadline hit */
-            // std::cout << task_running << std::endl;
+            missed = false;
             Profiler::log_hit_miss(task.priority, true, _tick_counter);
-            th.join();
-            if (task.priority == last_missed)
-            {
-                missed_in_a_row = 0;
-            }
         }
-        // }
-        // else
-        // {
-        //     task.function();
-        // }
-        Timestamp t2;
+
         hal.util->persistent_data.scheduler_task = -1;
 
         // record the tick counter when we ran. This drives
@@ -556,11 +493,6 @@ void AP_Scheduler::run(uint32_t time_available)
         // work out how long the event actually took
         now = AP_HAL::micros();
         // uint32_t time_taken = now - _task_time_started;
-        uint32_t time_taken = t2 - t1;
-
-        Profiler::log_exec_time(task.priority, t2 - t1, _tick_counter);
-
-        // std::cout << task.priority << " " << time_taken << " " << t2 - t1 << std::endl;
 
         bool overrun = false;
         if (time_taken > _task_time_allowed)
