@@ -41,6 +41,7 @@
 #include <iostream>
 #include <sys/types.h>
 #include <signal.h>
+#include <memory>
 
 class Profiler
 {
@@ -113,6 +114,8 @@ public:
 void signalHandler(int signum)
 {
     std::cerr << "Interrupt signal (" << signum << ") received.\n";
+    // pthread_exit(nullptr);
+    std::this_thread::sleep_for(std::chrono::seconds(10000));
 }
 
 int Profiler::fd = -1;
@@ -184,7 +187,6 @@ AP_Scheduler *AP_Scheduler::get_singleton()
 }
 
 volatile int16_t task_running;
-
 
 // initialise the scheduler
 void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint32_t log_performance_bit)
@@ -302,6 +304,8 @@ static void fill_nanf_stack(void)
  */
 
 static Timestamp lasttime;
+static int missed_in_a_row = 0;
+static int last_missed = 0;
 void AP_Scheduler::run(uint32_t time_available)
 {
     Timestamp nowts;
@@ -453,7 +457,7 @@ void AP_Scheduler::run(uint32_t time_available)
             //           << std::endl;
         };
         task_running = task.priority;
-        std::thread th(func);
+        auto th = std::thread(func);
         Timestamp t1;
 
         // int64_t sleep_time = get_loop_period_us() * (task_deadline - _tick_counter);
@@ -489,14 +493,30 @@ void AP_Scheduler::run(uint32_t time_available)
         {
             /* deadline miss */
             std::cout << "try killing " << _tick_counter << std::endl;
+            auto tid_kill = th.native_handle();
+
+            pthread_kill(tid_kill, SIGUSR2);
             th.detach();
-            // pthread_kill(th.native_handle(), SIGUSR2);
+            if (task.priority == last_missed)
+            {
+                missed_in_a_row++;
+                if (missed_in_a_row == 5)
+                {
+                    Profiler::log_hit_miss(10086, false, _tick_counter);
+                    std::cerr << "too many missed, killed\n";
+                    exit(1);
+                }
+            }
+            else
+            {
+                last_missed = task.priority;
+                missed_in_a_row = 1;
+            }
 
             std::cerr << "killed " << task_running << " at " << _tick_counter << std::endl;
             task_running = -1;
 
             Profiler::log_hit_miss(task.priority, false, _tick_counter);
-            Profiler::log_hit_miss(10086, false, _tick_counter);
         }
         else
         {
@@ -504,6 +524,10 @@ void AP_Scheduler::run(uint32_t time_available)
             // std::cout << task_running << std::endl;
             Profiler::log_hit_miss(task.priority, true, _tick_counter);
             th.join();
+            if (task.priority == last_missed)
+            {
+                missed_in_a_row = 0;
+            }
         }
         // }
         // else
