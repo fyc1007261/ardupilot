@@ -447,6 +447,9 @@ void AP_Scheduler::run(uint32_t time_available)
         else
             ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter + 1);
 
+
+        ddl_us = ddl_us - get_loop_period_us() + time_available;
+
         task_running = task.priority;
         Timestamp t_start;
         auto th = std::thread(task.function);
