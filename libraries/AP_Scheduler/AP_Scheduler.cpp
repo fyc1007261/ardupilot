@@ -449,8 +449,9 @@ void AP_Scheduler::run(uint32_t time_available)
 
         task_running = task.priority;
         Timestamp t_start;
-        // auto th = std::thread(func);
-        task.function();
+        auto th = std::thread(task.function);
+        // task.function();
+	th.join();
         Timestamp t_finish;
         uint32_t time_taken = t_finish - t_start;
 
@@ -463,8 +464,8 @@ void AP_Scheduler::run(uint32_t time_available)
 
             std::cout << "ddl miss taking " << time_taken << " allowed " << ddl_us << std::endl;
 
-            _tick_counter -= ((time_taken - ddl_us) / get_loop_period_us() + 1);
-            _tick_counter32 -= ((time_taken - ddl_us) / get_loop_period_us() + 1);
+            // _tick_counter -= ((time_taken - ddl_us) / get_loop_period_us() + 1);
+            // _tick_counter32 -= ((time_taken - ddl_us) / get_loop_period_us() + 1);
         }
         else
         {
