@@ -452,9 +452,9 @@ void AP_Scheduler::run(uint32_t time_available)
 
         task_running = task.priority;
         Timestamp t_start;
-        auto th = std::thread(task.function);
-        // task.function();
-	th.join();
+        // auto th = std::thread(task.function);
+        task.function();
+	// th.join();
         Timestamp t_finish;
         uint32_t time_taken = t_finish - t_start;
 
