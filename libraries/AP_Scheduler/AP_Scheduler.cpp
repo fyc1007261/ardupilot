@@ -451,14 +451,13 @@ uint32_t AP_Scheduler::run(uint32_t time_available)
         else
             ddl_us = get_loop_period_us() * ((uint32_t)UINT16_MAX + task_deadline - _tick_counter + 1);
 
-
         ddl_us = ddl_us - get_loop_period_us() + time_available;
 
         task_running = task.priority;
         Timestamp t_start;
         // auto th = std::thread(task.function);
         task.function();
-	// th.join();
+        // th.join();
         Timestamp t_finish;
         uint32_t time_taken = t_finish - t_start;
 
@@ -527,9 +526,16 @@ uint32_t AP_Scheduler::run(uint32_t time_available)
               Just set time_available to zero, which means we will
               only run fast tasks after this one
              */
+            if (missed)
+            {
+                for (int tt = 0; tt < task.rate_hz / _loop_rate_hz - 1; tt++)
+                {
+                    tick();
+                }
+                return 0;
+            }
             while (time_taken - time_available > _loop_period_us)
             {
-                tick();
                 time_taken -= _loop_period_us;
             }
             return time_taken - time_available;
@@ -537,12 +543,6 @@ uint32_t AP_Scheduler::run(uint32_t time_available)
         else
         {
             time_available -= time_taken;
-        }
-        if (missed)
-        {
-            /* should have returned*/
-            std::cout << "error" << std::endl;
-            exit(1);
         }
     }
 
@@ -645,7 +645,7 @@ void AP_Scheduler::loop()
     // time_available += extra_loop_us;
 
     // run the tasks
-    _last_overrun =  run(time_available - _last_overrun);
+    _last_overrun = run(time_available - _last_overrun);
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     // move result of AP_HAL::micros() forward:
