@@ -536,6 +536,7 @@ uint32_t AP_Scheduler::run(uint32_t time_available)
             }
             while (time_taken - time_available > _loop_period_us)
             {
+                tick();
                 time_taken -= _loop_period_us;
             }
             return time_taken - time_available;
