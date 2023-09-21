@@ -128,7 +128,7 @@ public:
     // run the tasks. Call this once per 'tick'.
     // time_available is the amount of time available to run
     // tasks in microseconds
-    void run(uint32_t time_available);
+    uint32_t run(uint32_t time_available);
 
     // return the number of microseconds available for the current task
     uint16_t time_available_usec(void) const;
@@ -229,6 +229,7 @@ private:
 
     /* time delayed by slow tasks */
     uint32_t _tick_delayed;
+    uint32_t _last_overrun;
 
     // tick counter at the time we last ran each task
     uint16_t *_last_run;

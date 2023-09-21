@@ -244,6 +244,7 @@ void AP_Scheduler::init(const AP_Scheduler::Task *tasks, uint8_t num_tasks, uint
     /* Yifan: register SIGUSR2 handler to indicate that
     a task has finished */
     task_running = -1;
+    _last_overrun = 0;
     // setup initial performance counters
     perf_info.set_loop_rate(get_loop_rate_hz());
     perf_info.reset();
@@ -304,7 +305,9 @@ static void fill_nanf_stack(void)
  */
 
 static Timestamp lasttime;
-void AP_Scheduler::run(uint32_t time_available)
+
+/* return the time that the scheduler overruns */
+uint32_t AP_Scheduler::run(uint32_t time_available)
 {
     Timestamp nowts;
     // std::cout << "current hertz " << _loop_rate_hz << std::endl;
@@ -362,7 +365,8 @@ void AP_Scheduler::run(uint32_t time_available)
             common_tasks_offset++;
         }
 
-        if (task.priority > MAX_FAST_TASK_PRIORITIES)
+        // if (task.priority > MAX_FAST_TASK_PRIORITIES)
+        if (1)
         {
             // const uint16_t dt = _tick_counter - _last_run[i];
             /* Yifan: compute the start of period */
@@ -523,8 +527,12 @@ void AP_Scheduler::run(uint32_t time_available)
               Just set time_available to zero, which means we will
               only run fast tasks after this one
              */
-            time_available = 0;
-            return;
+            while (time_taken - time_available > _loop_period_us)
+            {
+                tick();
+                time_taken -= _loop_period_us;
+            }
+            return time_taken - time_available;
         }
         else
         {
@@ -532,8 +540,9 @@ void AP_Scheduler::run(uint32_t time_available)
         }
         if (missed)
         {
-            time_available = 0;
-            return;
+            /* should have returned*/
+            std::cout << "error" << std::endl;
+            exit(1);
         }
     }
 
@@ -546,6 +555,8 @@ void AP_Scheduler::run(uint32_t time_available)
         _spare_ticks /= 2;
         _spare_micros /= 2;
     }
+
+    return 0;
 }
 
 /*
@@ -634,7 +645,7 @@ void AP_Scheduler::loop()
     // time_available += extra_loop_us;
 
     // run the tasks
-    run(time_available);
+    _last_overrun =  run(time_available - _last_overrun);
 
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     // move result of AP_HAL::micros() forward:
